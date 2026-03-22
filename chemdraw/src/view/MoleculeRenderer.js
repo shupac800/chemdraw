@@ -37,9 +37,17 @@ function renderBond(ctx, bond, atomA, atomB, molecule, selected) {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  // Calculate endpoints, trimming for visible labels
-  let { x: x1, y: y1 } = atomA;
-  let { x: x2, y: y2 } = atomB;
+  // Calculate endpoints, adjusting for connecting element position within labels
+  let x1 = atomA.x;
+  let y1 = atomA.y;
+  let x2 = atomB.x;
+  let y2 = atomB.y;
+
+  // Shift endpoints to target the connecting element character, not label center
+  const showA = shouldShowLabel(molecule, atomA);
+  const showB = shouldShowLabel(molecule, atomB);
+  if (showB) x2 += getElementAnchorOffset(ctx, molecule, atomB);
+  if (showA) x1 += getElementAnchorOffset(ctx, molecule, atomA);
 
   const dx = x2 - x1;
   const dy = y2 - y1;
@@ -49,9 +57,9 @@ function renderBond(ctx, bond, atomA, atomB, molecule, selected) {
   const ux = dx / len;
   const uy = dy / len;
 
-  // Trim bond endpoints if atom label is visible
-  const trimA = shouldShowLabel(molecule, atomA) ? getLabelTrim(ctx, molecule, atomA) : 0;
-  const trimB = shouldShowLabel(molecule, atomB) ? getLabelTrim(ctx, molecule, atomB) : 0;
+  // Trim bond endpoints at the element character edge
+  const trimA = showA ? getElementTrim(ctx, molecule, atomA) : 0;
+  const trimB = showB ? getElementTrim(ctx, molecule, atomB) : 0;
 
   x1 += ux * trimA;
   y1 += uy * trimA;
@@ -244,13 +252,79 @@ function getRingInteriorSide(molecule, bond) {
   return 1;
 }
 
-function getLabelTrim(ctx, molecule, atom) {
+/**
+ * Return the x-offset from atom center to the connecting element character
+ * center within the label. For "HO", O is to the right of center (positive).
+ * For "CH3", C is to the left of center (negative).
+ */
+function getElementAnchorOffset(ctx, molecule, atom) {
+  if (atom.label) return 0; // abbreviations: unknown anchor
+  const label = buildAtomLabel(molecule, atom);
+  const parts = label.parts;
+
+  ctx.save();
+  let totalWidth = 0;
+  let elementStart = 0;
+  let elementWidth = 0;
+  let foundElement = false;
+
+  for (const part of parts) {
+    const fontSize = part.type === 'subscript' || part.type === 'superscript'
+      ? ATOM_FONT_SIZE * 0.7 : ATOM_FONT_SIZE;
+    ctx.font = `${fontSize}px Arial, Helvetica, sans-serif`;
+    const w = ctx.measureText(part.text).width;
+
+    if (!foundElement && part.text === atom.element &&
+        part.type !== 'subscript' && part.type !== 'superscript') {
+      elementStart = totalWidth;
+      elementWidth = w;
+      foundElement = true;
+    }
+    totalWidth += w;
+  }
+  ctx.restore();
+
+  if (!foundElement) return 0;
+  return (elementStart + elementWidth / 2) - totalWidth / 2;
+}
+
+/**
+ * Return the trim distance from the element character center to its edge,
+ * so the bond stops at the element character boundary.
+ */
+function getElementTrim(ctx, molecule, atom) {
+  if (atom.label) {
+    // Abbreviation: trim by full label width
+    ctx.save();
+    ctx.font = ATOM_FONT;
+    const w = ctx.measureText(atom.label).width;
+    ctx.restore();
+    return w / 2 + ATOM_LABEL_MARGIN;
+  }
+
   const label = buildAtomLabel(molecule, atom);
   ctx.save();
-  ctx.font = ATOM_FONT;
-  const metrics = ctx.measureText(label.text);
+  let elementWidth = 0;
+
+  for (const part of label.parts) {
+    if (part.text === atom.element &&
+        part.type !== 'subscript' && part.type !== 'superscript') {
+      ctx.font = `${ATOM_FONT_SIZE}px Arial, Helvetica, sans-serif`;
+      elementWidth = ctx.measureText(part.text).width;
+      break;
+    }
+  }
   ctx.restore();
-  return metrics.width / 2 + ATOM_LABEL_MARGIN;
+
+  if (elementWidth === 0) {
+    // Fallback
+    ctx.save();
+    ctx.font = ATOM_FONT;
+    elementWidth = ctx.measureText(label.text).width;
+    ctx.restore();
+  }
+
+  return elementWidth / 2 + ATOM_LABEL_MARGIN;
 }
 
 function renderAtom(ctx, molecule, atom, selected) {
