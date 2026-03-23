@@ -132,10 +132,13 @@ export class KeyboardShortcuts {
       return;
     }
 
-    // Escape
+    // Escape: cancel in-progress operation, or switch to select tool
     if (e.key === 'Escape') {
-      this.app.selection.clear();
-      this.app.toolManager.setActiveTool(TOOLS.SELECT);
+      const cancelled = this.app.toolManager.cancelActiveTool();
+      if (!cancelled) {
+        this.app.selection.clear();
+        this.app.toolManager.setActiveTool(TOOLS.SELECT);
+      }
       return;
     }
 
@@ -260,6 +263,9 @@ export class KeyboardShortcuts {
         }
       }
       this.app.doc.addObject(obj);
+    }
+    if (pasted.length > 0) {
+      this.app.doc._notify('change');
     }
   }
 

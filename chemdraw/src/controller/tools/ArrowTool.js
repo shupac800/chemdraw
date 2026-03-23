@@ -21,6 +21,14 @@ export class ArrowTool {
     if (this.overlay) this.overlay.previewArrow = null;
   }
 
+  cancel() {
+    if (!this._drawing) return false;
+    this._drawing = false;
+    if (this.overlay) this.overlay.previewArrow = null;
+    this.doc._notify('preview');
+    return true;
+  }
+
   onMouseDown(point) {
     this._drawing = true;
     this._startPoint = { ...point };

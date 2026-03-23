@@ -65,6 +65,17 @@ export class ToolManager {
     }
   }
 
+  /**
+   * Cancel any in-progress operation on the active tool.
+   * Returns true if something was cancelled, false if tool was idle.
+   */
+  cancelActiveTool() {
+    if (this._activeTool?.cancel) {
+      return this._activeTool.cancel();
+    }
+    return false;
+  }
+
   onKeyDown(e) {
     if (this._activeTool?.onKeyDown) {
       this._activeTool.onKeyDown(e);

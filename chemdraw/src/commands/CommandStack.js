@@ -1,40 +1,93 @@
+/**
+ * Snapshot-based undo/redo system.
+ * Captures document state after each 'change' event and allows
+ * stepping backward/forward through history.
+ */
 export class CommandStack {
   constructor() {
-    this._undoStack = [];
-    this._redoStack = [];
+    this._history = [];   // array of JSON snapshots
+    this._position = -1;  // current position in history
     this._listeners = [];
+    this._restoring = false;
+    this._doc = null;
+    this._selection = null;
+    this._maxHistory = 100;
   }
 
-  get canUndo() { return this._undoStack.length > 0; }
-  get canRedo() { return this._redoStack.length > 0; }
+  /**
+   * Bind to a document and selection. Saves the initial state and
+   * listens for 'change' events to auto-snapshot.
+   */
+  bind(doc, selection) {
+    this._doc = doc;
+    this._selection = selection;
+    this._saveSnapshot(); // save initial state
 
-  execute(cmd) {
-    cmd.execute();
-    this._undoStack.push(cmd);
-    this._redoStack = [];
+    doc.onChange((type) => {
+      if (type === 'change') {
+        this._saveSnapshot();
+      }
+    });
+  }
+
+  get canUndo() { return this._position > 0; }
+  get canRedo() { return this._position < this._history.length - 1; }
+
+  /**
+   * Capture current document state as a new history entry.
+   * Discards any redo history beyond the current position.
+   */
+  _saveSnapshot() {
+    if (this._restoring) return; // don't save during undo/redo restore
+
+    // Discard redo future
+    this._history.length = this._position + 1;
+
+    // Push new snapshot
+    this._history.push(JSON.parse(JSON.stringify(this._doc.objects)));
+    this._position = this._history.length - 1;
+
+    // Limit history size
+    if (this._history.length > this._maxHistory) {
+      this._history.shift();
+      this._position--;
+    }
     this._notify();
   }
 
   undo() {
     if (!this.canUndo) return;
-    const cmd = this._undoStack.pop();
-    cmd.undo();
-    this._redoStack.push(cmd);
-    this._notify();
+    this._position--;
+    this._restore();
   }
 
   redo() {
     if (!this.canRedo) return;
-    const cmd = this._redoStack.pop();
-    cmd.execute();
-    this._undoStack.push(cmd);
+    this._position++;
+    this._restore();
+  }
+
+  _restore() {
+    this._restoring = true;
+    this._doc.objects = JSON.parse(JSON.stringify(this._history[this._position]));
+    if (this._selection) this._selection.clear();
+    this._doc._notify('change');
+    this._restoring = false;
     this._notify();
   }
 
   clear() {
-    this._undoStack = [];
-    this._redoStack = [];
+    this._history = [];
+    this._position = -1;
+    if (this._doc) {
+      this._saveSnapshot(); // save current state as new baseline
+    }
     this._notify();
+  }
+
+  // Keep the old execute() API as a no-op for backwards compat
+  execute(cmd) {
+    if (cmd && typeof cmd.execute === 'function') cmd.execute();
   }
 
   onChange(listener) {

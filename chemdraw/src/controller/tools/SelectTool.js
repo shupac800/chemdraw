@@ -25,6 +25,29 @@ export class SelectTool {
     if (this.overlay) this.overlay.marquee = null;
   }
 
+  cancel() {
+    if (!this._dragging) return false;
+    // Restore atoms to their start positions if we were moving
+    if (this._mode === 'move' && this._moveStartPositions) {
+      for (const [atomId, pos] of Object.entries(this._moveStartPositions)) {
+        for (const mol of this.doc.getMolecules()) {
+          const atom = mol.atoms.find(a => a.id === atomId);
+          if (atom) {
+            atom.x = pos.x;
+            atom.y = pos.y;
+          }
+        }
+      }
+      this.doc._notify('move');
+    }
+    this._dragging = false;
+    this._mode = null;
+    this._moveStartPositions = null;
+    if (this.overlay) this.overlay.marquee = null;
+    this.cursor?.setDefault();
+    return true;
+  }
+
   onMouseDown(point, modifiers) {
     this._startPoint = { ...point };
     this._lastPoint = { ...point };

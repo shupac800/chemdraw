@@ -31,6 +31,7 @@ class ChemDraw {
     this.selection = new Selection();
     this.clipboard = new Clipboard();
     this.commandStack = new CommandStack();
+    this.commandStack.bind(this.doc, this.selection);
 
     // Canvas
     this.canvas = document.getElementById('drawing-canvas');

@@ -18,11 +18,25 @@ export class RingTool {
 
     this.ringSize = 6; // default cyclohexane
     this.aromatic = false; // benzene mode
+    this._rotationStep = 0;
+    this._lastMousePos = null;
   }
 
-  activate() { this.cursor?.setCrosshair(); }
+  activate() {
+    this.cursor?.setCrosshair();
+    this._rotationStep = 0;
+    this._lastMousePos = null;
+  }
   deactivate() {
     if (this.overlay) this.overlay.previewRing = null;
+    this._lastMousePos = null;
+  }
+
+  cancel() {
+    if (this.overlay) this.overlay.previewRing = null;
+    this._rotationStep = 0;
+    this._lastMousePos = null;
+    return false; // ring placement is instant, nothing to cancel mid-operation
   }
 
   setRingType(sizeOrType) {
@@ -33,6 +47,30 @@ export class RingTool {
       this.ringSize = sizeOrType;
       this.aromatic = false;
     }
+  }
+
+  onKeyDown(e) {
+    if (e.key === 'r' || e.key === 'R') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this._rotationStep++;
+      this._updatePreview();
+    }
+  }
+
+  _getStartAngle() {
+    // Each step rotates by π/ringSize, giving 2*ringSize distinct orientations
+    return -Math.PI / 2 + this._rotationStep * (Math.PI / this.ringSize);
+  }
+
+  _updatePreview() {
+    if (!this._lastMousePos || !this.overlay) return;
+    const positions = generateRingPositions(
+      this._lastMousePos.x, this._lastMousePos.y,
+      this.ringSize, BOND_LENGTH, this._getStartAngle()
+    );
+    this.overlay.previewRing = positions;
+    this.doc._notify('preview');
   }
 
   onMouseDown(point) {
@@ -57,9 +95,10 @@ export class RingTool {
   }
 
   onMouseMove(point) {
-    // Show ring preview
+    this._lastMousePos = { ...point };
+    // Show ring preview with current rotation
     const positions = generateRingPositions(
-      point.x, point.y, this.ringSize, BOND_LENGTH
+      point.x, point.y, this.ringSize, BOND_LENGTH, this._getStartAngle()
     );
     if (this.overlay) {
       this.overlay.previewRing = positions;
@@ -72,18 +111,56 @@ export class RingTool {
   }
 
   _placeRingAt(cx, cy) {
-    const positions = generateRingPositions(cx, cy, this.ringSize, BOND_LENGTH);
-    const molecule = createMolecule();
+    const positions = generateRingPositions(cx, cy, this.ringSize, BOND_LENGTH, this._getStartAngle());
 
-    const atoms = positions.map(pos => {
+    // Check if any generated positions overlap with existing atoms.
+    // If so, merge into the existing molecule instead of creating a new one.
+    let molecule = null;
+    const atoms = [];
+
+    for (const pos of positions) {
+      const existing = this.doc.findAtomAtPoint(pos, SNAP_RADIUS);
+      if (existing) {
+        const existingMol = this.doc.findMoleculeByAtomId(existing.id);
+        if (existingMol) {
+          if (!molecule) {
+            molecule = existingMol;
+          } else if (molecule.id !== existingMol.id) {
+            // Merge existingMol into molecule
+            for (const a of existingMol.atoms) molecule.atoms.push(a);
+            for (const b of existingMol.bonds) molecule.bonds.push(b);
+            this.doc.removeObject(existingMol.id);
+          }
+          atoms.push(existing);
+          continue;
+        }
+      }
       const atom = createAtom({ x: pos.x, y: pos.y });
+      if (!molecule) {
+        molecule = createMolecule();
+        this.doc.addObject(molecule);
+      }
       addAtom(molecule, atom);
-      return atom;
-    });
+      atoms.push(atom);
+    }
 
-    // Create bonds around the ring
+    // If we still have no molecule (shouldn't happen), create one
+    if (!molecule) {
+      molecule = createMolecule();
+      this.doc.addObject(molecule);
+    }
+
+    // Create bonds around the ring, skipping duplicates
     for (let i = 0; i < atoms.length; i++) {
       const next = (i + 1) % atoms.length;
+      if (atoms[i].id === atoms[next].id) continue;
+
+      const existing = molecule.bonds.find(b =>
+        (b.atomA === atoms[i].id && b.atomB === atoms[next].id) ||
+        (b.atomA === atoms[next].id && b.atomB === atoms[i].id)
+      );
+      if (existing) continue;
+
       const isDouble = this.aromatic && (i % 2 === 0);
       const bond = createBond(atoms[i].id, atoms[next].id, {
         type: isDouble ? BOND_TYPES.DOUBLE : BOND_TYPES.SINGLE,
@@ -91,7 +168,6 @@ export class RingTool {
       addBond(molecule, bond);
     }
 
-    this.doc.addObject(molecule);
     this.doc._notify('change');
   }
 

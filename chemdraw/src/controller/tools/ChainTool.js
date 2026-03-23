@@ -25,6 +25,14 @@ export class ChainTool {
     if (this.overlay) this.overlay.previewChain = null;
   }
 
+  cancel() {
+    if (!this._drawing) return false;
+    this._drawing = false;
+    if (this.overlay) this.overlay.previewChain = null;
+    this.doc._notify('preview');
+    return true;
+  }
+
   onMouseDown(point) {
     this._drawing = true;
     this.selection.clear();
