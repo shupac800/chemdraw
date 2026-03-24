@@ -59,6 +59,14 @@ export class KeyboardShortcuts {
           e.preventDefault();
           this._paste();
           break;
+        case 'g':
+          e.preventDefault();
+          this._group();
+          break;
+        case 'G':
+          e.preventDefault();
+          this._ungroup();
+          break;
       }
       return;
     }
@@ -267,6 +275,22 @@ export class KeyboardShortcuts {
     if (pasted.length > 0) {
       this.app.doc._notify('change');
     }
+  }
+
+  _group() {
+    const { selection, doc } = this.app;
+    const atomIds = selection.atomIds;
+    const objectIds = selection.objectIds;
+    if (atomIds.length + objectIds.length < 2) return;
+    doc.createGroup(atomIds, objectIds);
+  }
+
+  _ungroup() {
+    const { selection, doc } = this.app;
+    const atomIds = selection.atomIds;
+    const objectIds = selection.objectIds;
+    if (atomIds.length === 0 && objectIds.length === 0) return;
+    doc.ungroupItems(atomIds, objectIds);
   }
 
   _getSelectedMolecules() {

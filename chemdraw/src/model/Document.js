@@ -6,6 +6,8 @@ export class Document {
     this.pageWidth = options.pageWidth || DEFAULT_PAGE.width;
     this.pageHeight = options.pageHeight || DEFAULT_PAGE.height;
     this.objects = []; // Molecule[], Arrow[], TextLabel[]
+    this.groups = []; // Array of { id, atomIds: string[], objectIds: string[] }
+    this._nextGroupId = 1;
     this._listeners = [];
   }
 
@@ -113,8 +115,54 @@ export class Document {
     return this.objects.filter(o => o.type === 'molecule');
   }
 
+  /**
+   * Create a group from sets of atom IDs and object IDs.
+   */
+  createGroup(atomIds, objectIds = []) {
+    if (atomIds.length === 0 && objectIds.length === 0) return null;
+    // Remove these IDs from any existing groups
+    this.ungroupItems(atomIds, objectIds);
+    const group = {
+      id: `group_${this._nextGroupId++}`,
+      atomIds: [...atomIds],
+      objectIds: [...objectIds],
+    };
+    this.groups.push(group);
+    this._notify('change');
+    return group;
+  }
+
+  /**
+   * Remove items from any groups they belong to. Deletes empty groups.
+   */
+  ungroupItems(atomIds, objectIds = []) {
+    const atomSet = new Set(atomIds);
+    const objSet = new Set(objectIds);
+    for (const group of this.groups) {
+      group.atomIds = group.atomIds.filter(id => !atomSet.has(id));
+      group.objectIds = group.objectIds.filter(id => !objSet.has(id));
+    }
+    this.groups = this.groups.filter(g => g.atomIds.length > 0 || g.objectIds.length > 0);
+    this._notify('change');
+  }
+
+  /**
+   * Find the group containing an atom ID.
+   */
+  findGroupByAtomId(atomId) {
+    return this.groups.find(g => g.atomIds.includes(atomId)) || null;
+  }
+
+  /**
+   * Find the group containing an object ID.
+   */
+  findGroupByObjectId(objectId) {
+    return this.groups.find(g => g.objectIds.includes(objectId)) || null;
+  }
+
   clear() {
     this.objects = [];
+    this.groups = [];
     this._notify('clear');
   }
 
@@ -136,6 +184,7 @@ export class Document {
       pageWidth: this.pageWidth,
       pageHeight: this.pageHeight,
       objects: JSON.parse(JSON.stringify(this.objects)),
+      groups: JSON.parse(JSON.stringify(this.groups)),
     };
   }
 
@@ -145,6 +194,7 @@ export class Document {
       pageHeight: data.pageHeight,
     });
     doc.objects = data.objects || [];
+    doc.groups = data.groups || [];
     return doc;
   }
 }

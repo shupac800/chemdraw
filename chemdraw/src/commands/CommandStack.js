@@ -43,8 +43,11 @@ export class CommandStack {
     // Discard redo future
     this._history.length = this._position + 1;
 
-    // Push new snapshot
-    this._history.push(JSON.parse(JSON.stringify(this._doc.objects)));
+    // Push new snapshot (objects + groups)
+    this._history.push({
+      objects: JSON.parse(JSON.stringify(this._doc.objects)),
+      groups: JSON.parse(JSON.stringify(this._doc.groups || [])),
+    });
     this._position = this._history.length - 1;
 
     // Limit history size
@@ -69,7 +72,15 @@ export class CommandStack {
 
   _restore() {
     this._restoring = true;
-    this._doc.objects = JSON.parse(JSON.stringify(this._history[this._position]));
+    const snapshot = this._history[this._position];
+    // Support both old format (plain array) and new format ({objects, groups})
+    if (Array.isArray(snapshot)) {
+      this._doc.objects = JSON.parse(JSON.stringify(snapshot));
+      this._doc.groups = [];
+    } else {
+      this._doc.objects = JSON.parse(JSON.stringify(snapshot.objects));
+      this._doc.groups = JSON.parse(JSON.stringify(snapshot.groups || []));
+    }
     if (this._selection) this._selection.clear();
     this._doc._notify('change');
     this._restoring = false;

@@ -59,6 +59,7 @@ export class SelectTool {
         this.selection.toggleAtom(atom.id);
       } else if (!this.selection.hasAtom(atom.id)) {
         this.selection.selectAtom(atom.id);
+        this._selectGroup(atom.id, null);
       }
 
       this._dragging = true;
@@ -73,11 +74,13 @@ export class SelectTool {
     if (bond) {
       if (modifiers.shiftKey) {
         this.selection.toggleBond(bond.id);
-      } else {
-        // Select both atoms of the bond
+      } else if (!this.selection.hasAtom(bond.atomA) && !this.selection.hasAtom(bond.atomB)) {
+        // Only replace selection if the bond isn't part of current selection
         this.selection.selectBond(bond.id);
         this.selection.addAtom(bond.atomA);
         this.selection.addAtom(bond.atomB);
+        this._selectGroup(bond.atomA, null);
+        this._selectGroup(bond.atomB, null);
       }
 
       this._dragging = true;
@@ -90,7 +93,10 @@ export class SelectTool {
     // Check arrows/text
     const obj = this.doc.findObjectAtPoint(point);
     if (obj) {
-      this.selection.selectObject(obj.id);
+      if (!this.selection.hasObject(obj.id)) {
+        this.selection.selectObject(obj.id);
+        this._selectGroup(null, obj.id);
+      }
       this._dragging = true;
       this._mode = 'move';
       this._objDragStart = { x: obj.x || obj.points?.[0]?.x || 0, y: obj.y || obj.points?.[0]?.y || 0 };
@@ -309,6 +315,34 @@ export class SelectTool {
         seen.add(key);
         return true;
       });
+    }
+  }
+
+  /**
+   * If the clicked atom or object belongs to a group, select all
+   * members of that group.
+   */
+  _selectGroup(atomId, objectId) {
+    let group = null;
+    if (atomId) group = this.doc.findGroupByAtomId(atomId);
+    if (!group && objectId) group = this.doc.findGroupByObjectId(objectId);
+    if (!group) return;
+
+    for (const id of group.atomIds) {
+      this.selection.addAtom(id);
+    }
+    for (const id of group.objectIds) {
+      // addObject doesn't exist, but we can use the internal set
+      this.selection._selectedObjects.add(id);
+    }
+    // Also select all bonds between grouped atoms
+    const atomSet = new Set(group.atomIds);
+    for (const mol of this.doc.getMolecules()) {
+      for (const bond of mol.bonds) {
+        if (atomSet.has(bond.atomA) && atomSet.has(bond.atomB)) {
+          this.selection.addBond(bond.id);
+        }
+      }
     }
   }
 
