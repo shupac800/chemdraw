@@ -262,6 +262,9 @@ export class KeyboardShortcuts {
 
   _paste() {
     const pasted = this.app.clipboard.paste();
+    if (pasted.length === 0) return;
+
+    this.app.selection.clear();
     for (const obj of pasted) {
       // Offset pasted objects
       if (obj.type === 'molecule') {
@@ -271,10 +274,14 @@ export class KeyboardShortcuts {
         }
       }
       this.app.doc.addObject(obj);
+      // Select all pasted objects so they can be moved as a unit
+      if (obj.type === 'molecule') {
+        this.app.selection.selectMolecule(obj);
+      } else {
+        this.app.selection._selectedObjects.add(obj.id);
+      }
     }
-    if (pasted.length > 0) {
-      this.app.doc._notify('change');
-    }
+    this.app.doc._notify('change');
   }
 
   _group() {
