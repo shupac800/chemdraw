@@ -290,7 +290,7 @@ export class KeyboardShortcuts {
     const atomIds = selection.atomIds;
     const objectIds = selection.objectIds;
     if (atomIds.length === 0 && objectIds.length === 0) return;
-    doc.ungroupItems(atomIds, objectIds);
+    doc.dissolveGroups(atomIds, objectIds);
   }
 
   _getSelectedMolecules() {

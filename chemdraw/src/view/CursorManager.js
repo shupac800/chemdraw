@@ -9,4 +9,5 @@ export class CursorManager {
   setPointer() { this.canvas.style.cursor = 'pointer'; }
   setText() { this.canvas.style.cursor = 'text'; }
   setEraser() { this.canvas.style.cursor = 'pointer'; }
+  setRotate() { this.canvas.style.cursor = 'grab'; }
 }

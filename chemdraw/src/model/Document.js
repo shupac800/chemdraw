@@ -134,6 +134,7 @@ export class Document {
 
   /**
    * Remove items from any groups they belong to. Deletes empty groups.
+   * Used internally when creating a new group (to avoid duplicate membership).
    */
   ungroupItems(atomIds, objectIds = []) {
     const atomSet = new Set(atomIds);
@@ -143,6 +144,21 @@ export class Document {
       group.objectIds = group.objectIds.filter(id => !objSet.has(id));
     }
     this.groups = this.groups.filter(g => g.atomIds.length > 0 || g.objectIds.length > 0);
+    this._notify('change');
+  }
+
+  /**
+   * Dissolve any groups that contain the given atom or object IDs.
+   * Removes the entire group, not just the specified items.
+   */
+  dissolveGroups(atomIds, objectIds = []) {
+    const atomSet = new Set(atomIds);
+    const objSet = new Set(objectIds);
+    this.groups = this.groups.filter(g => {
+      const hasAtom = g.atomIds.some(id => atomSet.has(id));
+      const hasObj = g.objectIds.some(id => objSet.has(id));
+      return !hasAtom && !hasObj;
+    });
     this._notify('change');
   }
 

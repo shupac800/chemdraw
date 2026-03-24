@@ -1,5 +1,5 @@
 import { SNAP_RADIUS } from '../../util/constants.js';
-import { normalizeRect } from '../../util/geometry.js';
+import { normalizeRect, rotatePoint } from '../../util/geometry.js';
 import { getBondsForAtom } from '../../model/Molecule.js';
 
 export class SelectTool {
@@ -12,17 +12,40 @@ export class SelectTool {
     this.cursor = null;
 
     this._dragging = false;
-    this._mode = null; // 'move', 'marquee'
+    this._mode = null; // 'move', 'marquee', 'rotate'
     this._startPoint = null;
     this._lastPoint = null;
     this._moveStartPositions = null;
+
+    // Rotation state
+    this._rotationCenter = null;
+    this._rotationStartAngle = null;
+    this._rotationStartPositions = null; // { atoms: {id: {x,y}}, objects: {id: {x,y} or [{x,y},...]} }
+    this._selectionChangeUnsub = null;
   }
 
-  activate() { this.cursor?.setDefault(); }
+  activate() {
+    this.cursor?.setDefault();
+    this._updateRotationHandle();
+    // Listen for selection changes to update the handle
+    this._selectionChangeUnsub = this.selection?.onChange(() => {
+      if (!this._dragging) this._updateRotationHandle();
+    });
+  }
+
   deactivate() {
     this._dragging = false;
     this._mode = null;
-    if (this.overlay) this.overlay.marquee = null;
+    if (this.overlay) {
+      this.overlay.marquee = null;
+      this.overlay.rotationHandle = null;
+      this.overlay.rotationAngle = null;
+      this.overlay.rotationCenter = null;
+    }
+    if (this._selectionChangeUnsub) {
+      this._selectionChangeUnsub();
+      this._selectionChangeUnsub = null;
+    }
   }
 
   cancel() {
@@ -40,10 +63,23 @@ export class SelectTool {
       }
       this.doc._notify('move');
     }
+    // Restore positions if we were rotating
+    if (this._mode === 'rotate' && this._rotationStartPositions) {
+      this._restoreRotationPositions();
+      this.doc._notify('move');
+    }
     this._dragging = false;
     this._mode = null;
     this._moveStartPositions = null;
-    if (this.overlay) this.overlay.marquee = null;
+    this._rotationStartPositions = null;
+    this._rotationCenter = null;
+    this._rotationStartAngle = null;
+    if (this.overlay) {
+      this.overlay.marquee = null;
+      this.overlay.rotationAngle = null;
+      this.overlay.rotationCenter = null;
+    }
+    this._updateRotationHandle();
     this.cursor?.setDefault();
     return true;
   }
@@ -51,6 +87,12 @@ export class SelectTool {
   onMouseDown(point, modifiers) {
     this._startPoint = { ...point };
     this._lastPoint = { ...point };
+
+    // Check rotation handle first (before atoms/bonds)
+    if (this.overlay?.isPointOnRotationHandle(point)) {
+      this._startRotation(point);
+      return;
+    }
 
     // Check if clicking on an atom
     const atom = this.doc.findAtomAtPoint(point, SNAP_RADIUS);
@@ -112,7 +154,7 @@ export class SelectTool {
     this._mode = 'marquee';
   }
 
-  onMouseMove(point) {
+  onMouseMove(point, modifiers) {
     if (!this._dragging) {
       this._updateHoverCursor(point);
       return;
@@ -127,6 +169,9 @@ export class SelectTool {
         break;
       case 'marquee':
         this._handleMarquee(point);
+        break;
+      case 'rotate':
+        this._handleRotation(point, modifiers);
         break;
     }
 
@@ -147,7 +192,15 @@ export class SelectTool {
     this._dragging = false;
     this._mode = null;
     this._moveStartPositions = null;
-    if (this.overlay) this.overlay.marquee = null;
+    this._rotationStartPositions = null;
+    this._rotationCenter = null;
+    this._rotationStartAngle = null;
+    if (this.overlay) {
+      this.overlay.marquee = null;
+      this.overlay.rotationAngle = null;
+      this.overlay.rotationCenter = null;
+    }
+    this._updateRotationHandle();
     this.cursor?.setDefault();
     this.doc._notify('change');
   }
@@ -346,7 +399,148 @@ export class SelectTool {
     }
   }
 
+  // ── Rotation ──
+
+  _startRotation(point) {
+    const bbox = this.selection.getSelectionBoundingBox(this.doc);
+    if (!bbox) return;
+
+    this._rotationCenter = {
+      x: bbox.x + bbox.width / 2,
+      y: bbox.y + bbox.height / 2,
+    };
+    this._rotationStartAngle = Math.atan2(
+      point.y - this._rotationCenter.y,
+      point.x - this._rotationCenter.x
+    );
+
+    // Save starting positions for all selected items
+    this._rotationStartPositions = { atoms: {}, objects: {} };
+    for (const atomId of this.selection.atomIds) {
+      for (const mol of this.doc.getMolecules()) {
+        const atom = mol.atoms.find(a => a.id === atomId);
+        if (atom) {
+          this._rotationStartPositions.atoms[atomId] = { x: atom.x, y: atom.y };
+        }
+      }
+    }
+    for (const objId of this.selection.objectIds) {
+      const obj = this.doc.getObjectById(objId);
+      if (!obj) continue;
+      if (obj.type === 'text') {
+        this._rotationStartPositions.objects[objId] = { type: 'text', x: obj.x, y: obj.y };
+      } else if (obj.type === 'arrow' && obj.points) {
+        this._rotationStartPositions.objects[objId] = {
+          type: 'arrow',
+          points: obj.points.map(p => ({ x: p.x, y: p.y })),
+        };
+      }
+    }
+
+    this._dragging = true;
+    this._mode = 'rotate';
+    if (this.overlay) {
+      this.overlay.rotationHandle = null; // hide handle during drag
+    }
+    this.cursor?.setRotate();
+  }
+
+  _handleRotation(point, modifiers) {
+    const center = this._rotationCenter;
+    if (!center) return;
+
+    let currentAngle = Math.atan2(
+      point.y - center.y,
+      point.x - center.x
+    );
+    let deltaAngle = currentAngle - this._rotationStartAngle;
+
+    // Shift-snap to 15-degree increments
+    if (modifiers?.shiftKey) {
+      const SNAP = Math.PI / 12;
+      deltaAngle = Math.round(deltaAngle / SNAP) * SNAP;
+    }
+
+    // Apply rotation from saved start positions (avoids drift)
+    for (const [atomId, startPos] of Object.entries(this._rotationStartPositions.atoms)) {
+      const rotated = rotatePoint(startPos, center, deltaAngle);
+      for (const mol of this.doc.getMolecules()) {
+        const atom = mol.atoms.find(a => a.id === atomId);
+        if (atom) {
+          atom.x = rotated.x;
+          atom.y = rotated.y;
+        }
+      }
+    }
+
+    for (const [objId, saved] of Object.entries(this._rotationStartPositions.objects)) {
+      const obj = this.doc.getObjectById(objId);
+      if (!obj) continue;
+      if (saved.type === 'text') {
+        const rotated = rotatePoint({ x: saved.x, y: saved.y }, center, deltaAngle);
+        obj.x = rotated.x;
+        obj.y = rotated.y;
+      } else if (saved.type === 'arrow') {
+        for (let i = 0; i < saved.points.length; i++) {
+          const rotated = rotatePoint(saved.points[i], center, deltaAngle);
+          obj.points[i].x = rotated.x;
+          obj.points[i].y = rotated.y;
+        }
+      }
+    }
+
+    if (this.overlay) {
+      this.overlay.rotationAngle = deltaAngle;
+      this.overlay.rotationCenter = center;
+    }
+    this.doc._notify('move');
+  }
+
+  _restoreRotationPositions() {
+    for (const [atomId, pos] of Object.entries(this._rotationStartPositions.atoms)) {
+      for (const mol of this.doc.getMolecules()) {
+        const atom = mol.atoms.find(a => a.id === atomId);
+        if (atom) {
+          atom.x = pos.x;
+          atom.y = pos.y;
+        }
+      }
+    }
+    for (const [objId, saved] of Object.entries(this._rotationStartPositions.objects)) {
+      const obj = this.doc.getObjectById(objId);
+      if (!obj) continue;
+      if (saved.type === 'text') {
+        obj.x = saved.x;
+        obj.y = saved.y;
+      } else if (saved.type === 'arrow') {
+        for (let i = 0; i < saved.points.length; i++) {
+          obj.points[i].x = saved.points[i].x;
+          obj.points[i].y = saved.points[i].y;
+        }
+      }
+    }
+  }
+
+  _updateRotationHandle() {
+    if (!this.overlay) return;
+    if (this.selection.isEmpty || this._dragging) {
+      this.overlay.rotationHandle = null;
+      return;
+    }
+    const bbox = this.selection.getSelectionBoundingBox(this.doc);
+    if (!bbox) {
+      this.overlay.rotationHandle = null;
+      return;
+    }
+    this.overlay.rotationHandle = { bbox };
+    this.doc._notify('move'); // trigger re-render to show handle
+  }
+
   _updateHoverCursor(point) {
+    if (this.overlay?.isPointOnRotationHandle(point)) {
+      this.cursor?.setRotate();
+      return;
+    }
     const atom = this.doc.findAtomAtPoint(point, SNAP_RADIUS);
     if (atom) {
       this.cursor?.setPointer();

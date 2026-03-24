@@ -1,3 +1,6 @@
+const HANDLE_OFFSET = 25;
+const HANDLE_RADIUS = 6;
+
 /**
  * Renders selection overlays: marquee rectangle and interaction previews.
  */
@@ -10,9 +13,39 @@ export class SelectionOverlay {
     this.previewRing = null;     // [{ x, y }, ...]
     this.previewChain = null;    // [{ x, y }, ...]
     this.previewArrow = null;    // { x1, y1, x2, y2 }
+    this.rotationHandle = null;  // { x, y, bbox } — set by SelectTool
+    this.rotationAngle = null;   // current rotation angle during drag
+    this.rotationCenter = null;  // center point during rotation drag
+  }
+
+  /**
+   * Returns the rotation handle position based on the current selection bbox.
+   * Returns null if no handle should be shown.
+   */
+  getRotationHandlePos() {
+    if (!this.rotationHandle) return null;
+    const { bbox } = this.rotationHandle;
+    return {
+      x: bbox.x + bbox.width / 2,
+      y: bbox.y - HANDLE_OFFSET,
+    };
+  }
+
+  /**
+   * Hit-test for the rotation handle.
+   */
+  isPointOnRotationHandle(point) {
+    const pos = this.getRotationHandlePos();
+    if (!pos) return false;
+    const dx = point.x - pos.x;
+    const dy = point.y - pos.y;
+    return Math.sqrt(dx * dx + dy * dy) <= HANDLE_RADIUS + 3;
   }
 
   render(ctx) {
+    if (this.rotationHandle && !this.rotationAngle) {
+      this._renderRotationHandle(ctx);
+    }
     if (this.marquee) {
       this._renderMarquee(ctx);
     }
@@ -119,6 +152,51 @@ export class SelectionOverlay {
       this.previewArrow.y2 - len * Math.sin(angle + spread)
     );
     ctx.stroke();
+    ctx.restore();
+  }
+
+  _renderRotationHandle(ctx) {
+    const pos = this.getRotationHandlePos();
+    if (!pos) return;
+    const { bbox } = this.rotationHandle;
+    const topCenter = { x: bbox.x + bbox.width / 2, y: bbox.y };
+
+    ctx.save();
+    // Line from top-center of bbox to handle
+    ctx.strokeStyle = '#2563eb';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(topCenter.x, topCenter.y);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+
+    // Handle circle
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = '#2563eb';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, HANDLE_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Rotation icon (curved arrow) inside the handle
+    ctx.strokeStyle = '#2563eb';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, 3, -Math.PI * 0.8, Math.PI * 0.4);
+    ctx.stroke();
+    // Small arrowhead
+    const tipAngle = Math.PI * 0.4;
+    const tx = pos.x + 3 * Math.cos(tipAngle);
+    const ty = pos.y + 3 * Math.sin(tipAngle);
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx + 2, ty - 2);
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx - 1, ty - 2.5);
+    ctx.stroke();
+
     ctx.restore();
   }
 }

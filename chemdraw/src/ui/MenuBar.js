@@ -53,6 +53,11 @@ export class MenuBar {
           { label: 'Delete', action: () => this._delete(), shortcut: 'Del',
             enabled: () => !this.app.selection.isEmpty },
           { label: 'Select All', action: () => this._selectAll(), shortcut: 'Ctrl+A' },
+          { type: 'separator' },
+          { label: 'Group', action: () => this._group(), shortcut: 'Ctrl+G',
+            enabled: () => this.app.selection.atomIds.length + this.app.selection.objectIds.length >= 2 },
+          { label: 'Ungroup', action: () => this._ungroup(), shortcut: 'Ctrl+Shift+G',
+            enabled: () => this._hasGroupedSelection() },
         ]
       },
       {
@@ -211,6 +216,33 @@ export class MenuBar {
     for (const mol of this.app.doc.getMolecules()) {
       this.app.selection.selectMolecule(mol);
     }
+  }
+
+  _group() {
+    const { selection, doc } = this.app;
+    const atomIds = selection.atomIds;
+    const objectIds = selection.objectIds;
+    if (atomIds.length + objectIds.length < 2) return;
+    doc.createGroup(atomIds, objectIds);
+  }
+
+  _ungroup() {
+    const { selection, doc } = this.app;
+    const atomIds = selection.atomIds;
+    const objectIds = selection.objectIds;
+    if (atomIds.length === 0 && objectIds.length === 0) return;
+    doc.dissolveGroups(atomIds, objectIds);
+  }
+
+  _hasGroupedSelection() {
+    const { selection, doc } = this.app;
+    for (const id of selection.atomIds) {
+      if (doc.findGroupByAtomId(id)) return true;
+    }
+    for (const id of selection.objectIds) {
+      if (doc.findGroupByObjectId(id)) return true;
+    }
+    return false;
   }
 
   _cleanUp() {

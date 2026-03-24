@@ -74,6 +74,39 @@ describe('Grouping', () => {
     expect(doc.groups.length).toBe(0);
   });
 
+  it('dissolveGroups removes entire group when any member is selected', () => {
+    const mol = makeHexagon(doc, 200, 200);
+    const allAtomIds = mol.atoms.map(a => a.id);
+    doc.createGroup(allAtomIds);
+    expect(doc.groups.length).toBe(1);
+
+    // Dissolve using just one atom from the group
+    doc.dissolveGroups([allAtomIds[0]]);
+    expect(doc.groups.length).toBe(0);
+  });
+
+  it('after dissolveGroups, clicking an atom does not select others', () => {
+    const mol = makeHexagon(doc, 200, 200);
+    const allAtomIds = mol.atoms.map(a => a.id);
+    doc.createGroup(allAtomIds);
+
+    // Dissolve the group
+    doc.dissolveGroups([allAtomIds[0]]);
+
+    // Click on the first atom
+    const clickPoint = { x: mol.atoms[0].x, y: mol.atoms[0].y };
+    tool.onMouseDown(clickPoint, {});
+    tool.onMouseUp(clickPoint, {});
+
+    // Only the clicked atom should be selected
+    expect(selection.hasAtom(allAtomIds[0])).toBe(true);
+    let otherSelected = 0;
+    for (let i = 1; i < allAtomIds.length; i++) {
+      if (selection.hasAtom(allAtomIds[i])) otherSelected++;
+    }
+    expect(otherSelected).toBe(0);
+  });
+
   it('clicking a grouped atom selects the entire group', () => {
     const mol = makeHexagon(doc, 200, 200);
     const allAtomIds = mol.atoms.map(a => a.id);
